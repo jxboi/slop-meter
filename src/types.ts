@@ -1,0 +1,110 @@
+export type Category =
+  | 'Architecture'
+  | 'Security'
+  | 'Simplicity'
+  | 'Testing'
+  | 'Duplication'
+  | 'Performance'
+  | 'Naming'
+  | 'Reliability';
+export interface Evidence {
+  file: string;
+  line: number;
+  snippet: string;
+  explanation: string;
+}
+export interface Finding {
+  id: string;
+  repoId: string;
+  title: string;
+  category: string;
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  impact: number;
+  risk: number;
+  blastRadius: number;
+  effort: number;
+  confidence: number;
+  findings: number;
+  patterns: number;
+  why: string;
+  deferReason?: string;
+  steps: string[];
+  dependencies: string[];
+  unlocks: number;
+  evidence: Evidence[];
+  sources: string[];
+  status: 'open' | 'in-progress' | 'resolved' | 'deferred';
+  score: number;
+}
+export interface Repo {
+  id: string;
+  name: string;
+  owner: string;
+  source: 'github' | 'local';
+  location: string;
+  stack: string;
+  health: number | null;
+  files: number;
+  lastScan: string | null;
+  demo?: boolean;
+  analysis?: { harness: string; coverage: string };
+  findings: Finding[];
+  trend: { date: string; value: number }[];
+}
+export interface Scan {
+  id: string;
+  repoId: string;
+  repoName: string;
+  startedAt: string;
+  completedAt?: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  phase: string;
+  progress: number;
+  harness: string;
+  model: string;
+  effort: string;
+  depth: string;
+  health?: number;
+  findingCount?: number;
+  error?: string;
+  coverage?: string;
+  profileId: string;
+  profileSnapshot?: Profile;
+  knowledgeIds?: string[];
+  commit?: string;
+  findings?: Finding[];
+  demo?: boolean;
+}
+export interface Profile {
+  id: string;
+  name: string;
+  description: string;
+  weights: Record<string, number>;
+  instructions: string;
+  rules: string;
+  active: boolean;
+}
+export interface Knowledge {
+  id: string;
+  title: string;
+  url: string;
+  category: string;
+  context: string;
+  fetchedAt?: string;
+  hash?: string;
+  content?: string;
+  error?: string;
+}
+export interface Workspace {
+  repos: Repo[];
+  scans: Scan[];
+  profiles: Profile[];
+  knowledge: Knowledge[];
+  settings: { workspaceName: string; defaultHarness: string; defaultModel: string };
+}
+export interface Harness {
+  id: string;
+  name: string;
+  available: boolean;
+  detail: string;
+}
