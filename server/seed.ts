@@ -1,4 +1,4 @@
-import type { Finding, Workspace, Repo, Profile } from '../src/types';
+import type { Finding, Workspace, Repo, Profile } from '../src/types.js';
 const ago = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
 const base: Omit<Finding, 'id' | 'repoId' | 'title' | 'why'> = {
   category: 'Architecture',

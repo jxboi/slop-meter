@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { UserButton } from '@clerk/react';
 import {
   House,
   FolderGit2,
@@ -19,7 +20,6 @@ import {
   AlertCircle,
   LoaderCircle,
   MessageSquare,
-  Monitor,
   CircleHelp,
 } from 'lucide-react';
 import type { Workspace, Harness, Finding, Repo, Scan } from './types';
@@ -68,7 +68,15 @@ const headings: Record<string, [string, string]> = {
   ],
   settings: ['Make yourself at home.', 'Your workspace, your tools, your way of working.'],
 };
-export default function App() {
+export default function App({
+  hosted = false,
+  userName = 'Your workspace',
+  userEmail = 'Personal environment',
+}: {
+  hosted?: boolean;
+  userName?: string;
+  userEmail?: string;
+}) {
   const [data, setData] = useState<Workspace | null>(null),
     [harnesses, setHarnesses] = useState<Harness[]>([]),
     [error, setError] = useState(''),
@@ -208,17 +216,17 @@ export default function App() {
           </div>
           <div className="local-status">
             <span className="tiny-dot" />
-            <span>Local workspace</span>
+            <span>{hosted ? 'Cloud workspace' : 'Local workspace'}</span>
             <span className="version">v1.0</span>
           </div>
-          <button className="user-button" onClick={() => navigate('settings')}>
-            <span className="user-avatar">Y</span>
-            <div>
-              <strong>Your workspace</strong>
-              <small>Personal environment</small>
+          <div className="user-button">
+            {hosted ? <UserButton /> : <span className="user-avatar">Y</span>}
+            <div className="user-copy">
+              <strong>{userName}</strong>
+              <small>{userEmail}</small>
             </div>
-            <ChevronsUpDown size={14} />
-          </button>
+            {!hosted && <ChevronsUpDown size={14} />}
+          </div>
         </div>
       </aside>
       <div className="main-shell">
@@ -337,6 +345,7 @@ export default function App() {
       )}
       {modal === 'add' && (
         <AddRepository
+          hosted={hosted}
           onClose={close}
           onAdded={async (r) => {
             await refresh();
@@ -377,7 +386,7 @@ export default function App() {
             <ol>
               <li>
                 <strong>Add your codebase.</strong>
-                <span>Connect a GitHub repository or a local directory.</span>
+                <span>Connect a GitHub repository{hosted ? '.' : ' or a local directory.'}</span>
               </li>
               <li>
                 <strong>Choose how to understand it.</strong>
@@ -416,7 +425,7 @@ export default function App() {
         <Modal title="Remove repository?" onClose={() => setRemoving(null)}>
           <p className="modal-intro">
             Remove {removing.owner}/{removing.name} and its scan history from this workspace? Your
-            source files will remain on disk.
+            source repository will not be changed.
           </p>
           <div className="modal-actions">
             <button className="button" onClick={() => setRemoving(null)}>

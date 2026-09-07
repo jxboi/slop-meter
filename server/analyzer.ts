@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import ignore from 'ignore';
-import type { Evidence, Finding, Profile } from '../src/types';
+import type { Evidence, Finding, Profile } from '../src/types.js';
 export interface SourceFile {
   path: string;
   content: string;

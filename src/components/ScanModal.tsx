@@ -4,9 +4,11 @@ import type { Workspace, Harness, Repo, Scan } from '../types';
 import { post } from '../api';
 import { Modal } from './ui';
 export function AddRepository({
+  hosted = false,
   onClose,
   onAdded,
 }: {
+  hosted?: boolean;
   onClose: () => void;
   onAdded: (repo: Repo) => void;
 }) {
@@ -43,17 +45,19 @@ export function AddRepository({
             <Github size={17} />
             GitHub repository
           </button>
-          <button
-            type="button"
-            className={source === 'local' ? 'selected' : ''}
-            onClick={() => {
-              setSource('local');
-              setLocation('');
-            }}
-          >
-            <Monitor size={17} />
-            Local directory
-          </button>
+          {!hosted && (
+            <button
+              type="button"
+              className={source === 'local' ? 'selected' : ''}
+              onClick={() => {
+                setSource('local');
+                setLocation('');
+              }}
+            >
+              <Monitor size={17} />
+              Local directory
+            </button>
+          )}
         </div>
         <label>
           {source === 'github' ? 'Repository URL' : 'Absolute directory path'}
@@ -70,7 +74,9 @@ export function AddRepository({
         </label>
         <p className="field-help">
           {source === 'github'
-            ? 'Public repositories work immediately. Private repositories use your local Git credentials.'
+            ? hosted
+              ? 'Hosted scans currently support public GitHub repositories.'
+              : 'Public repositories work immediately. Private repositories use your local Git credentials.'
             : 'The directory must be on the machine running Slop Meter.'}
         </p>
         <div className="info-box">

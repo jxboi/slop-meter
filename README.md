@@ -2,7 +2,9 @@
 
 **Give it a mess. It tells you where to start.**
 
-A local-first application for developers inheriting unfamiliar codebases. It turns source evidence into a small set of root causes, ranked engineering decisions, and a dependency-aware refactoring roadmap.
+A codebase-analysis application for developers inheriting unfamiliar repositories. It turns source evidence into a small set of root causes, ranked engineering decisions, and a dependency-aware refactoring roadmap. It can run locally or as an authenticated, per-user Vercel application.
+
+The hosted application is available at **https://slop-meter.vercel.app**.
 
 ## Run
 
@@ -22,7 +24,17 @@ npm run build
 npm start
 ```
 
-Then open **http://127.0.0.1:4310**. This is a personal local application, not an authenticated multi-user hosted service. Do not expose the API publicly.
+Then open **http://127.0.0.1:4310**.
+
+## Hosted deployment
+
+The Vercel deployment uses Clerk for authentication and a private Vercel Blob store for per-user workspace data. Configure these variables through the corresponding Vercel integrations:
+
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- `CLERK_SECRET_KEY`
+- `BLOB_READ_WRITE_TOKEN`
+
+Hosted scans accept public GitHub repositories. Local-directory repositories and machine-local CLI harnesses are available only when running the application locally. The hosted function downloads a source archive, never executes repository scripts, scans it in temporary storage, and removes the temporary files afterward.
 
 ## What works
 
@@ -78,11 +90,13 @@ AI responses must satisfy a validated JSON contract. Evidence paths and line num
 
 The initial knowledge library contains OWASP, React, Next.js, Express, and TypeScript documentation. The content evolves through refreshes; automatic discovery of arbitrary new sources and full semantic version pinning are future extensions. Dependency versions and source dates inform the AI, but applicability is not a mechanically verified fact. This release does not include an exhaustive package-advisory scanner, autonomous code changes, pull request creation, or team authentication.
 
-GitHub scans use a fresh shallow clone of the default branch, using existing local Git credentials for private repositories. Repository scripts are not executed. Temporary clone snapshots are removed after scanning; evidence and the commit ID remain in scan history. Local scans inspect the current working tree, including eligible uncommitted files.
+Local GitHub scans use a fresh shallow clone of the default branch and may use existing local Git credentials for private repositories. Hosted scans download the default branch archive of a public GitHub repository. Repository scripts are not executed. Temporary snapshots are removed after scanning; evidence and the commit ID remain in scan history. Local-directory scans inspect the current working tree, including eligible uncommitted files.
 
 ## Persistence and configuration
 
-All application state is saved atomically to `.data/workspace.json` with owner-only file permissions. `.data` is ignored by Git. Back up that file to retain repositories, scans, profiles, settings, and cached documentation.
+Locally, all application state is saved atomically to `.data/workspace.json` with owner-only file permissions. `.data` is ignored by Git. Back up that file to retain repositories, scans, profiles, settings, and cached documentation.
+
+On Vercel, each authenticated user receives an isolated workspace stored as a private Blob object under an opaque user-derived key. Workspace APIs require a valid Clerk session, and same-origin checks protect state-changing requests.
 
 - `SLOP_DATA_DIR`: alternate data directory; useful for isolated tests.
 - `PORT`: API port, default 4310. If changed during development, also change the Vite API proxy target.
@@ -92,7 +106,7 @@ A restart marks unfinished scans as interrupted rather than leaving permanent pr
 
 ## Implementation
 
-React 19 + TypeScript + Vite, Express 5, Zod, Lucide icons, and locally served Inter fonts. No database server, hosted backend, or external font service is needed.
+React 19 + TypeScript + Vite, Express 5, Clerk, private Vercel Blob storage, Zod, Lucide icons, and locally served Inter fonts.
 
 - `src/pages/`: individual product surfaces.
 - `src/components/`: dashboard, charts, tables, scan flows, evidence drawer, and reusable controls.

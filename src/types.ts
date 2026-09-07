@@ -101,6 +101,7 @@ export interface Workspace {
   profiles: Profile[];
   knowledge: Knowledge[];
   settings: { workspaceName: string; defaultHarness: string; defaultModel: string };
+  runtime?: { hosted: boolean; localRepositories: boolean; persistent: boolean };
 }
 export interface Harness {
   id: string;

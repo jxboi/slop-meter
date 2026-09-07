@@ -3,9 +3,9 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import type { Harness, Finding, Profile, Knowledge } from '../src/types';
-import type { SourceFile } from './analyzer';
-import { rank } from './analyzer';
+import type { Harness, Finding, Profile, Knowledge } from '../src/types.js';
+import type { SourceFile } from './analyzer.js';
+import { rank } from './analyzer.js';
 export function run(
   command: string,
   args: string[],
@@ -55,16 +55,19 @@ export function run(
   });
 }
 export async function harnesses(): Promise<Harness[]> {
-  const installed = await Promise.all(
-    ['codex', 'claude', 'copilot'].map(async (id) => {
-      try {
-        await run(id, ['--version'], { timeout: 5000 });
-        return true;
-      } catch {
-        return false;
-      }
-    }),
-  );
+  const hosted = process.env.VERCEL === '1';
+  const installed = hosted
+    ? [false, false, false]
+    : await Promise.all(
+        ['codex', 'claude', 'copilot'].map(async (id) => {
+          try {
+            await run(id, ['--version'], { timeout: 5000 });
+            return true;
+          } catch {
+            return false;
+          }
+        }),
+      );
   return [
     {
       id: 'static',
@@ -78,7 +81,9 @@ export async function harnesses(): Promise<Harness[]> {
       available: installed[i],
       detail: installed[i]
         ? 'Installed · uses your existing CLI authentication'
-        : 'CLI not found on this machine',
+        : hosted
+          ? 'CLI harnesses are available only in local mode'
+          : 'CLI not found on this machine',
     })),
     {
       id: 'openai',
