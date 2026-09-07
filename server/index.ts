@@ -10,6 +10,7 @@ import { dataDir, hosted, loadWorkspace, saveWorkspace } from './store.js';
 import { inventory, baseline, healthScore } from './analyzer.js';
 import { diagnose, harnesses, run } from './providers.js';
 import type { Knowledge, Repo, Scan, Workspace } from '../src/types.js';
+import { slopDimensions, patternById } from '../src/slopTaxonomy.js';
 
 const app = express();
 app.disable('x-powered-by');
@@ -157,13 +158,18 @@ app.patch('/api/findings/:id', async (req, res) => {
   res.json(finding);
 });
 
+const weight = z.number().int().min(0).max(5);
 const profileSchema = z.object({
   id: z.string().optional(),
   name: z.string().trim().min(1).max(100),
   description: z.string().max(500),
   instructions: z.string().max(5000),
   rules: z.string().max(5000),
-  weights: z.record(z.string().max(60), z.number().int().min(0).max(5)),
+  weights: z.object(
+    Object.fromEntries(slopDimensions.map((dimension) => [dimension, weight])) as {
+      [dimension in (typeof slopDimensions)[number]]: typeof weight;
+    },
+  ),
   active: z.boolean(),
 });
 
@@ -503,7 +509,7 @@ app.get('/api/export/:repoId', async (req, res) => {
         repo.findings
           .map(
             (finding, index) =>
-              `## ${index + 1}. ${finding.title}\n\n${finding.why}\n\n- Severity: ${finding.severity}\n- Priority score: ${finding.score}/100\n- Confidence: ${finding.confidence}%\n- Estimated effort: ${finding.effort} hours\n- Status: ${finding.status}\n- Prerequisites: ${finding.dependencies.join(', ') || 'None'}\n\n${finding.deferReason ? 'Defer rationale: ' + finding.deferReason + '\n\n' : ''}${finding.steps.map((step, stepIndex) => `${stepIndex + 1}. ${step}`).join('\n')}\n\n${finding.evidence.map((evidence) => `### ${evidence.file}:${evidence.line}\n\n${evidence.explanation}\n\n\`\`\`\n${evidence.snippet}\n\`\`\``).join('\n\n')}`,
+              `## ${index + 1}. ${finding.title}\n\n${finding.why}\n\n- Dimension: ${finding.dimension}\n- Pattern: ${patternById.get(finding.patternId)?.title || finding.patternId}\n- Severity: ${finding.severity}\n- Priority score: ${finding.score}/100\n- Confidence: ${finding.confidence}%\n- Estimated effort: ${finding.effort} hours\n- Status: ${finding.status}\n- Prerequisites: ${finding.dependencies.join(', ') || 'None'}\n\n${finding.deferReason ? 'Defer rationale: ' + finding.deferReason + '\n\n' : ''}${finding.steps.map((step, stepIndex) => `${stepIndex + 1}. ${step}`).join('\n')}\n\n${finding.evidence.map((evidence) => `### ${evidence.file}:${evidence.line}\n\n${evidence.explanation}\n\n\`\`\`\n${evidence.snippet}\n\`\`\``).join('\n\n')}`,
           )
           .join('\n\n'),
     );

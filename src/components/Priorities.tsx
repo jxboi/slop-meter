@@ -1,6 +1,7 @@
 import { ArrowRight, AlertTriangle, Clock3, GitBranch, LockKeyhole, Check } from 'lucide-react';
 import type { Finding, Repo } from '../types';
 import { Badge, Empty } from './ui';
+import { patternById } from '../slopTaxonomy';
 export function PriorityCard({
   finding: f,
   index,
@@ -38,7 +39,9 @@ export function PriorityCard({
         <div className="priority-repo">
           {repo?.owner}/{repo?.name}
           <span>·</span>
-          {f.category}
+          {f.dimension}
+          <span>·</span>
+          {patternById.get(f.patternId)?.title}
           {f.status === 'in-progress' && <Badge tone="green">In progress</Badge>}
         </div>
         <p>{f.why}</p>

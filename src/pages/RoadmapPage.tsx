@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { Workspace, Finding } from '../types';
 import { Badge, SectionTitle, Empty } from '../components/ui';
+import { patternById } from '../slopTaxonomy';
 
 export function RoadmapPage({
   data,
@@ -105,7 +106,7 @@ export function RoadmapPage({
                           <div>
                             <span className="eyeline">
                               {data.repos.find((r) => r.id === f.repoId)?.name} <span>·</span>{' '}
-                              {f.category}
+                              {f.dimension} <span>·</span> {patternById.get(f.patternId)?.title}
                             </span>
                             <h3>{f.title}</h3>
                             <p>{f.deferReason && i === 2 ? f.deferReason : f.why}</p>

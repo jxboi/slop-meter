@@ -4,6 +4,7 @@ import { Save, Plus, Settings2 } from 'lucide-react';
 import type { Profile } from '../types';
 import { post } from '../api';
 import { Badge, SectionTitle } from '../components/ui';
+import { dimensionDescriptions, slopDimensions } from '../slopTaxonomy';
 type Shared = {
   data: Workspace;
   refresh: () => Promise<void>;
@@ -98,27 +99,33 @@ export function ProfilesPage({ data, refresh, notify }: Shared) {
         </div>
         <h3 className="form-section-label">What matters to your team?</h3>
         <p className="field-help">
-          Adjust the emphasis. These guide discovery, not a fixed checklist.
+          Adjust the emphasis. These guide discovery, not a fixed checklist.{' '}
+          <a href="#guide">Explore the built-in rubric.</a>
         </p>
         <div className="weight-grid">
-          {Object.entries(draft.weights).map(([key, value]) => (
-            <label className="weight" key={key}>
-              <span>
-                {key}
-                <strong>{['Minimal', 'Low', 'Some', 'Balanced', 'High', 'Highest'][value]}</strong>
-              </span>
-              <input
-                aria-label={`${key} emphasis`}
-                type="range"
-                min="0"
-                max="5"
-                value={value}
-                onChange={(e) =>
-                  setDraft({ ...draft, weights: { ...draft.weights, [key]: +e.target.value } })
-                }
-              />
-            </label>
-          ))}
+          {slopDimensions.map((key) => {
+            const value = draft.weights[key];
+            return (
+              <label className="weight" key={key} title={dimensionDescriptions[key]}>
+                <span>
+                  {key}
+                  <strong>
+                    {['Minimal', 'Low', 'Some', 'Balanced', 'High', 'Highest'][value]}
+                  </strong>
+                </span>
+                <input
+                  aria-label={`${key} emphasis`}
+                  type="range"
+                  min="0"
+                  max="5"
+                  value={value}
+                  onChange={(e) =>
+                    setDraft({ ...draft, weights: { ...draft.weights, [key]: +e.target.value } })
+                  }
+                />
+              </label>
+            );
+          })}
         </div>
         <label>
           In your own words

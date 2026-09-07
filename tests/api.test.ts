@@ -89,6 +89,12 @@ test('real API: add local repo → scan → evidence → resolve → refactor �
     );
     assert.ok(before.health < 100);
     assert.equal(before.findings[0].evidence[0].line, 2);
+    assert.ok(before.findings.every((finding: { dimension?: string }) => finding.dimension));
+    assert.ok(before.findings.every((finding: { patternId?: string }) => finding.patternId));
+    const firstExportResponse = await fetch(url + '/api/export/' + id);
+    const firstExport = await firstExportResponse.text();
+    assert.match(firstExport, /Dimension:/);
+    assert.match(firstExport, /Pattern:/);
     await request('/findings/' + before.findings[0].id, 'PATCH', { status: 'resolved' });
     const after = (await request('/workspace')).body.repos.find((r: { id: string }) => r.id === id);
     assert.equal(before.health, after.health, 'manual resolution must not change measured score');

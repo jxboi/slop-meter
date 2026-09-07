@@ -34,6 +34,10 @@ The Vercel deployment uses Clerk for authentication and a private Vercel Blob st
 - `CLERK_SECRET_KEY`
 - `BLOB_READ_WRITE_TOKEN`
 
+Enable GitHub as a social connection in the Clerk dashboard. The hosted sign-in screen sends users
+directly through Clerk's GitHub OAuth flow and returns them to `/sso-callback` before opening their
+workspace.
+
 Hosted scans accept public GitHub repositories. Local-directory repositories and machine-local CLI harnesses are available only when running the application locally. The hosted function downloads a source archive, never executes repository scripts, scans it in temporary storage, and removes the temporary files afterward.
 
 ## What works
@@ -50,7 +54,8 @@ Hosted scans accept public GitHub repositories. Local-directory repositories and
 - Decision status tracking and Markdown roadmap export. Refactoring happens in your editor or harness; Slop Meter never changes the repository's source files.
 - Rescans update health and trends while preserving each scan's findings, profile snapshot, source commit when available, knowledge fingerprints, and scope.
 - Current authoritative documentation retrieval, freshness timestamps, content fingerprints, failure states, and same-host redirect handling. Cached guidance is refreshed before an AI scan when older than 24 hours. Installed dependency manifests are supplied to the model for version/context matching.
-- Custom profiles, presets, natural-language instructions, team rules, and adjustable category emphasis.
+- Custom profiles, presets, natural-language instructions, team rules, and adjustable dimension emphasis.
+- A built-in Common AI Slop rubric: 40 concrete patterns normalized into eight dimensions, with Repository Fit emphasized and a searchable in-app guide.
 - Persistent settings and data, scan progress, cancellation, failure recovery, mobile navigation, focus-trapped dialogs, and reduced-motion support.
 
 ## Harness setup

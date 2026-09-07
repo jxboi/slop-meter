@@ -1,7 +1,8 @@
 import type { Finding, Workspace, Repo, Profile } from '../src/types.js';
 const ago = (days: number) => new Date(Date.now() - days * 86400000).toISOString();
 const base: Omit<Finding, 'id' | 'repoId' | 'title' | 'why'> = {
-  category: 'Architecture',
+  dimension: 'Architecture',
+  patternId: 'poor-architecture-boundaries',
   severity: 'high',
   impact: 8,
   risk: 7,
@@ -56,7 +57,8 @@ const findings: Finding[] = [
     id: 'auth-boundary',
     repoId: 'api',
     title: 'Centralize authentication checks',
-    category: 'Security',
+    dimension: 'Security',
+    patternId: 'security-slop',
     severity: 'critical',
     impact: 10,
     risk: 10,
@@ -89,7 +91,8 @@ const findings: Finding[] = [
     id: 'data-fetching',
     repoId: 'platform',
     title: 'Consolidate duplicate data fetching',
-    category: 'Duplication',
+    dimension: 'Maintainability',
+    patternId: 'copy-paste-duplication',
     severity: 'medium',
     impact: 6,
     risk: 4,
@@ -124,7 +127,8 @@ const findings: Finding[] = [
     id: 'error-contract',
     repoId: 'api',
     title: 'Give errors a consistent contract',
-    category: 'Reliability',
+    dimension: 'Correctness',
+    patternId: 'error-handling-slop',
     severity: 'medium',
     impact: 6,
     risk: 5,
@@ -156,7 +160,8 @@ const findings: Finding[] = [
     id: 'token-cleanup',
     repoId: 'design-system',
     title: 'Retire the legacy token adapters',
-    category: 'Simplicity',
+    dimension: 'Complexity',
+    patternId: 'unnecessary-abstractions',
     severity: 'low',
     impact: 3,
     risk: 2,
@@ -237,12 +242,12 @@ const repos: Repo[] = [
 const weights = {
   Architecture: 5,
   Security: 5,
-  Simplicity: 4,
-  Testing: 4,
-  Duplication: 3,
+  Complexity: 4,
+  Maintainability: 4,
+  Correctness: 4,
   Performance: 3,
-  Naming: 2,
-  Reliability: 4,
+  'Repository Fit': 5,
+  'AI Fingerprints': 3,
 };
 export const profiles: Profile[] = [
   {
@@ -259,7 +264,7 @@ export const profiles: Profile[] = [
     id: 'security',
     name: 'Security first',
     description: 'Close trust-boundary gaps and reduce exposure.',
-    weights: { ...weights, Security: 5, Architecture: 3, Simplicity: 2, Testing: 5 },
+    weights: { ...weights, Security: 5, Architecture: 3, Complexity: 2, Correctness: 5 },
     instructions:
       'Prioritize reachable vulnerabilities and missing authorization. Distinguish confirmed evidence from potential exposure.',
     rules: 'Every security change must include a regression test.',
@@ -269,7 +274,14 @@ export const profiles: Profile[] = [
     id: 'legacy',
     name: 'Legacy rescue',
     description: 'Find a safe starting point in an unfamiliar codebase.',
-    weights: { ...weights, Architecture: 5, Testing: 5, Simplicity: 5, Naming: 1 },
+    weights: {
+      ...weights,
+      Architecture: 5,
+      Maintainability: 5,
+      Correctness: 5,
+      Complexity: 5,
+      'AI Fingerprints': 1,
+    },
     instructions:
       'Recommend small safe steps. Capture existing behavior before changing it. Avoid broad rewrites.',
     rules: 'Use characterization tests before changing shared modules.',
@@ -278,6 +290,7 @@ export const profiles: Profile[] = [
 ];
 export function seed(): Workspace {
   return {
+    schemaVersion: 2,
     repos,
     profiles,
     scans: repos.flatMap((r) =>

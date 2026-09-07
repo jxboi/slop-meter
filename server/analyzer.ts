@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import ignore from 'ignore';
 import type { Evidence, Finding, Profile } from '../src/types.js';
+import type { SlopDimension, SlopPatternId } from '../src/slopTaxonomy.js';
 export interface SourceFile {
   path: string;
   content: string;
@@ -153,7 +154,7 @@ export function rank(findings: Finding[], profile: Profile) {
   const ids = new Set(findings.map((f) => f.id));
   for (const f of findings) {
     f.dependencies = [...new Set(f.dependencies)].filter((d) => ids.has(d) && d !== f.id);
-    const weight = profile.weights[f.category] ?? 3;
+    const weight = profile.weights[f.dimension] ?? 3;
     f.score = Math.round(
       Math.min(
         100,
@@ -189,7 +190,8 @@ export function baseline(files: SourceFile[], repoId: string, profile: Profile):
     string,
     {
       title: string;
-      category: string;
+      dimension: SlopDimension;
+      patternId: SlopPatternId;
       severity: Finding['severity'];
       why: string;
       steps: string[];
@@ -221,7 +223,8 @@ export function baseline(files: SourceFile[], repoId: string, profile: Profile):
           ' lines. Size is a review signal, not proof of poor architecture.',
         {
           title: 'Review oversized module boundaries',
-          category: 'Architecture',
+          dimension: 'Maintainability',
+          patternId: 'god-objects-god-functions',
           severity: 'medium',
           why: 'Large modules concentrate change. Inspect responsibilities and callers before extracting smaller units; file size alone does not justify a rewrite.',
           steps: [
@@ -242,7 +245,8 @@ export function baseline(files: SourceFile[], repoId: string, profile: Profile):
           'Dynamic code evaluation is present. Trace the input to establish whether untrusted content can reach it.',
           {
             title: 'Audit dynamic execution boundaries',
-            category: 'Security',
+            dimension: 'Security',
+            patternId: 'security-slop',
             severity: 'high',
             why: 'Dynamic execution can turn an input-validation mistake into code execution. Verify reachability before deciding whether this is a vulnerability.',
             steps: [
@@ -264,7 +268,8 @@ export function baseline(files: SourceFile[], repoId: string, profile: Profile):
           'An empty catch discards the failure without observable recovery.',
           {
             title: 'Make silent failures observable',
-            category: 'Reliability',
+            dimension: 'Correctness',
+            patternId: 'error-handling-slop',
             severity: 'high',
             why: 'Swallowed errors hide the cause of failed operations. Establish recovery and reporting at the boundary before patching individual callers.',
             steps: [
@@ -286,7 +291,8 @@ export function baseline(files: SourceFile[], repoId: string, profile: Profile):
       'No test or spec filenames were observed in the scanned inventory. Tests may exist outside this scope.',
       {
         title: 'Establish a safety net before refactoring',
-        category: 'Testing',
+        dimension: 'Maintainability',
+        patternId: 'testing-slop',
         severity: 'medium',
         why: 'No test files were found in the scanned scope. Protect critical behavior before moving shared code, and verify external test coverage first.',
         steps: [
@@ -319,7 +325,8 @@ export function baseline(files: SourceFile[], repoId: string, profile: Profile):
             ' after whitespace normalization.',
           {
             title: 'Consolidate identical source modules',
-            category: 'Duplication',
+            dimension: 'Maintainability',
+            patternId: 'copy-paste-duplication',
             severity: 'medium',
             why: 'Identical modules can drift as fixes land in only one copy. Verify that the duplication is not intentional before selecting a shared owner.',
             steps: [
@@ -334,13 +341,14 @@ export function baseline(files: SourceFile[], repoId: string, profile: Profile):
       id: `${repoId}-${key}`,
       repoId,
       title: g.title,
-      category: g.category,
+      dimension: g.dimension,
+      patternId: g.patternId,
       severity: g.severity,
       impact: g.severity === 'high' ? 8 : 5,
-      risk: g.category === 'Security' ? 9 : 5,
+      risk: g.dimension === 'Security' ? 9 : 5,
       blastRadius: Math.min(10, g.evidence.length + 2),
       effort: 4,
-      confidence: g.category === 'Architecture' ? 65 : 80,
+      confidence: g.patternId === 'god-objects-god-functions' ? 65 : 80,
       findings: g.evidence.length,
       patterns: 1,
       why: g.why,

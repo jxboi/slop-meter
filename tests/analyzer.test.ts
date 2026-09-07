@@ -6,6 +6,8 @@ import path from 'node:path';
 import { inventory, baseline, rank, redact, healthScore } from '../server/analyzer';
 import { parseResult, diagnose } from '../server/providers';
 import { profiles, seed } from '../server/seed';
+import { normalizeWorkspace } from '../server/migrate';
+import { patternById, slopDimensions, slopPatterns } from '../src/slopTaxonomy';
 const profile = profiles[0];
 test('inventory respects ignore rules, excludes symlinks and secret files, and redacts credentials', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'slop-test-'));
@@ -41,7 +43,8 @@ test('baseline compresses repeated silent failures into a root cause with file e
   const result = baseline(files, 'repo', profile);
   assert.equal(result.length, 1);
   assert.equal(result[0].findings, 4);
-  assert.equal(result[0].category, 'Reliability');
+  assert.equal(result[0].dimension, 'Correctness');
+  assert.equal(result[0].patternId, 'error-handling-slop');
   assert.equal(result[0].evidence[2].file, 'module-2.ts');
 });
 test('large modules are treated as review signals, not confirmed architectural defects', () => {
@@ -67,8 +70,14 @@ test('dependencies outrank severity and cycles are broken deterministically', ()
 });
 test('profile emphasis changes scores without changing severity', () => {
   const f = structuredClone(seed().repos[0].findings[0]);
-  const low = rank([structuredClone(f)], { ...profile, weights: { Architecture: 0 } })[0];
-  const high = rank([structuredClone(f)], { ...profile, weights: { Architecture: 5 } })[0];
+  const low = rank([structuredClone(f)], {
+    ...profile,
+    weights: { ...profile.weights, Architecture: 0 },
+  })[0];
+  const high = rank([structuredClone(f)], {
+    ...profile,
+    weights: { ...profile.weights, Architecture: 5 },
+  })[0];
   assert.ok(high.score > low.score);
   assert.equal(high.severity, low.severity);
 });
@@ -82,10 +91,84 @@ test('common inline credential assignments are redacted', () => {
   assert.equal(redact('api_key: "example-secret"'), 'api_key: "[REDACTED]"');
   assert.equal(redact("password = 'secret'"), "password = '[REDACTED]'");
 });
+test('built-in rubric stays aligned with the 40-pattern markdown reference', async () => {
+  const markdown = await fs.readFile(path.resolve('common-ai-slop.md'), 'utf8');
+  const headings = [...markdown.matchAll(/^## \d+\. (.+)$/gm)].map((match) => match[1]);
+  assert.equal(slopPatterns.length, 40);
+  assert.equal(new Set(slopPatterns.map((pattern) => pattern.id)).size, 40);
+  assert.deepEqual(
+    slopPatterns.map((pattern) => pattern.title),
+    headings,
+  );
+  for (const pattern of slopPatterns.slice(0, 39)) {
+    const section = markdown.match(
+      new RegExp(
+        `^## \\d+\\. ${pattern.title.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\n([\\s\\S]*?)(?=^## |^# Suggested)`,
+        'm',
+      ),
+    )?.[1];
+    assert.deepEqual(
+      pattern.examples,
+      [...(section || '').matchAll(/^- (.+)$/gm)].map((match) => match[1]),
+    );
+  }
+  assert.deepEqual(
+    new Set(slopPatterns.map((pattern) => pattern.dimension)),
+    new Set(slopDimensions),
+  );
+});
+test('workspace migration normalizes active and historical findings without changing evidence', () => {
+  const workspace = structuredClone(seed()) as ReturnType<typeof seed> & Record<string, unknown>;
+  workspace.schemaVersion = 1;
+  const current = workspace.repos[0].findings[0] as (typeof workspace.repos)[0]['findings'][0] &
+    Record<string, unknown>;
+  const historical = workspace.scans[0].findings![0] as typeof current;
+  const preserved = {
+    score: current.score,
+    status: current.status,
+    evidence: structuredClone(current.evidence),
+  };
+  for (const finding of [current, historical]) {
+    Reflect.deleteProperty(finding, 'dimension');
+    Reflect.deleteProperty(finding, 'patternId');
+    finding.category = 'Architecture';
+  }
+  workspace.profiles[0].weights = {
+    Architecture: 5,
+    Security: 4,
+    Simplicity: 2,
+    Testing: 4,
+    Duplication: 3,
+    Performance: 2,
+    Naming: 1,
+    Reliability: 4,
+  } as unknown as (typeof workspace.profiles)[0]['weights'];
+  assert.equal(normalizeWorkspace(workspace), true);
+  assert.equal(workspace.schemaVersion, 2);
+  assert.equal(current.dimension, 'Architecture');
+  assert.equal(current.patternId, 'poor-architecture-boundaries');
+  assert.equal(current.legacyCategory, 'Architecture');
+  assert.equal(historical.dimension, 'Architecture');
+  assert.deepEqual(
+    { score: current.score, status: current.status, evidence: current.evidence },
+    preserved,
+  );
+  assert.deepEqual(Object.keys(workspace.profiles[0].weights), [...slopDimensions]);
+});
 test('malformed model output and unsupported severity are rejected', () => {
   assert.throws(() => parseResult('This code looks good'));
   assert.throws(() => parseResult('{"findings":[{"severity":"catastrophic"}]}'));
   assert.deepEqual(parseResult('```json\n{"findings":[]}\n```'), { findings: [] });
+});
+test('model results reject invented patterns and dimension mismatches', () => {
+  const finding = structuredClone(seed().repos[0].findings[0]);
+  assert.throws(() =>
+    parseResult(JSON.stringify({ findings: [{ ...finding, patternId: 'invented-pattern' }] })),
+  );
+  assert.throws(() =>
+    parseResult(JSON.stringify({ findings: [{ ...finding, dimension: 'Security' }] })),
+  );
+  assert.equal(patternById.get(finding.patternId)?.dimension, finding.dimension);
 });
 test('AI adapter validates evidence and replaces model snippets with actual source lines', async () => {
   const originalFetch = globalThis.fetch,
@@ -137,6 +220,8 @@ test('AI adapter validates evidence and replaces model snippets with actual sour
     assert.equal(result.findings[0].evidence[0].snippet, 'const y = 2;');
     assert.deepEqual(result.findings[0].sources, []);
     assert.deepEqual(requestBody.reasoning, { effort: 'high' });
+    assert.match(String(requestBody.input), /BUILT-IN SLOP RUBRIC/);
+    assert.match(String(requestBody.input), /Repository Fit/);
     assert.match(result.coverage, /1 of 1/);
   } finally {
     globalThis.fetch = originalFetch;

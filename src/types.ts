@@ -1,12 +1,4 @@
-export type Category =
-  | 'Architecture'
-  | 'Security'
-  | 'Simplicity'
-  | 'Testing'
-  | 'Duplication'
-  | 'Performance'
-  | 'Naming'
-  | 'Reliability';
+import type { SlopDimension, SlopPatternId } from './slopTaxonomy.js';
 export interface Evidence {
   file: string;
   line: number;
@@ -17,7 +9,9 @@ export interface Finding {
   id: string;
   repoId: string;
   title: string;
-  category: string;
+  dimension: SlopDimension;
+  patternId: SlopPatternId;
+  legacyCategory?: string;
   severity: 'critical' | 'high' | 'medium' | 'low';
   impact: number;
   risk: number;
@@ -79,7 +73,7 @@ export interface Profile {
   id: string;
   name: string;
   description: string;
-  weights: Record<string, number>;
+  weights: Record<SlopDimension, number>;
   instructions: string;
   rules: string;
   active: boolean;
@@ -96,6 +90,7 @@ export interface Knowledge {
   error?: string;
 }
 export interface Workspace {
+  schemaVersion?: number;
   repos: Repo[];
   scans: Scan[];
   profiles: Profile[];

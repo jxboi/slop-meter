@@ -7,6 +7,7 @@ import {
   History,
   SlidersHorizontal,
   BookOpen,
+  BookMarked,
   Settings,
   ChevronsUpDown,
   Building2,
@@ -33,6 +34,7 @@ import { HistoryPage } from './pages/HistoryPage';
 import { ProfilesPage } from './pages/ProfilesPage';
 import { KnowledgePage } from './pages/KnowledgePage';
 import { SettingsPage } from './pages/SettingsPage';
+import { SlopGuidePage } from './pages/SlopGuidePage';
 import { AddRepository, ScanModal } from './components/ScanModal';
 import { FindingDrawer } from './components/FindingDrawer';
 const nav = [
@@ -42,6 +44,7 @@ const nav = [
   { id: 'history', name: 'Scan history', icon: History },
   { id: 'profiles', name: 'Slop profiles', icon: SlidersHorizontal },
   { id: 'knowledge', name: 'Living knowledge', icon: BookOpen },
+  { id: 'guide', name: 'Slop guide', icon: BookMarked },
   { id: 'settings', name: 'Settings', icon: Settings },
 ];
 const headings: Record<string, [string, string]> = {
@@ -65,6 +68,10 @@ const headings: Record<string, [string, string]> = {
   knowledge: [
     'Knowledge that keeps up.',
     'Current sources. Relevant context. Better engineering decisions.',
+  ],
+  guide: [
+    'Know the smell. Find the cause.',
+    'A practical rubric for spotting code that looks complete but makes the repository harder to change.',
   ],
   settings: ['Make yourself at home.', 'Your workspace, your tools, your way of working.'],
 };
@@ -145,9 +152,11 @@ export default function App({
     : undefined;
   const active = page.startsWith('repo/')
     ? 'repositories'
-    : nav.some((n) => n.id === page)
-      ? page
-      : 'overview';
+    : page.startsWith('guide/')
+      ? 'guide'
+      : nav.some((n) => n.id === page)
+        ? page
+        : 'overview';
   const heading = repo
     ? [`${repo.owner} / ${repo.name}`, 'Your codebase, understood. Here’s what to fix first.']
     : headings[active];
@@ -257,7 +266,7 @@ export default function App({
           </div>
         </header>
         <main>
-          <div className="page-heading">
+          <div className={`page-heading ${active === 'guide' ? 'guide-page-heading' : ''}`}>
             <div>
               <h1>{heading[0]}</h1>
               <p>{heading[1]}</p>
@@ -329,6 +338,11 @@ export default function App({
             <ProfilesPage {...shared} />
           ) : active === 'knowledge' ? (
             <KnowledgePage {...shared} />
+          ) : active === 'guide' ? (
+            <SlopGuidePage
+              key={page}
+              initialPattern={page.startsWith('guide/') ? page.slice(6) : undefined}
+            />
           ) : (
             <SettingsPage {...shared} harnesses={harnesses} />
           )}
@@ -376,6 +390,10 @@ export default function App({
           repos={data.repos}
           onClose={closeFinding}
           onStatus={updateStatus}
+          onGuide={(patternId) => {
+            closeFinding();
+            navigate(`guide/${patternId}`);
+          }}
         />
       )}{' '}
       {modal === 'help' && (

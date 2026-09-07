@@ -4,6 +4,7 @@ import { ArrowRight, RefreshCw, Check, X } from 'lucide-react';
 import type { Profile, Harness, Scan } from '../types';
 import { post, relative } from '../api';
 import { Badge, Empty, Modal } from '../components/ui';
+import { patternById } from '../slopTaxonomy';
 type Shared = {
   data: Workspace;
   refresh: () => Promise<void>;
@@ -138,7 +139,12 @@ export function HistoryPage({ data, refresh, notify }: Shared) {
                 <h3>{selected.findings.length} root causes in this snapshot</h3>
                 {selected.findings.map((f) => (
                   <div className="snapshot-row" key={f.id}>
-                    <span>{f.title}</span>
+                    <span>
+                      {f.title}
+                      <small>
+                        {f.dimension} · {patternById.get(f.patternId)?.title}
+                      </small>
+                    </span>
                     <Badge>{f.confidence}%</Badge>
                   </div>
                 ))}

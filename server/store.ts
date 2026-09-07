@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { get, put } from '@vercel/blob';
 import { seed } from './seed.js';
 import type { Workspace } from '../src/types.js';
+import { normalizeWorkspace } from './migrate.js';
 
 export const hosted = process.env.VERCEL === '1';
 export const dataDir = hosted
@@ -38,6 +39,7 @@ function loadLocal() {
   localState = recoverInterruptedScans(
     fs.existsSync(localFilename) ? JSON.parse(fs.readFileSync(localFilename, 'utf8')) : seed(),
   );
+  normalizeWorkspace(localState as Workspace & Record<string, unknown>);
   saveLocal(localState);
   return localState;
 }
@@ -51,16 +53,14 @@ export async function loadWorkspace(userId: string): Promise<Workspace> {
   if (!hosted) return loadLocal();
   const result = await get(workspacePath(userId), { access: 'private', useCache: false });
   if (!result || result.statusCode !== 200) return seed();
-  return JSON.parse(await new Response(result.stream).text()) as Workspace;
+  const workspace = JSON.parse(await new Response(result.stream).text()) as Workspace;
+  if (normalizeWorkspace(workspace as Workspace & Record<string, unknown>)) {
+    await persistHosted(userId, workspace);
+  }
+  return workspace;
 }
 
-export async function saveWorkspace(userId: string, workspace: Workspace): Promise<void> {
-  if (!hosted) {
-    localState = workspace;
-    saveLocal(workspace);
-    return;
-  }
-
+async function persistHosted(userId: string, workspace: Workspace) {
   const snapshot = JSON.stringify(workspace);
   const previous = writes.get(userId) || Promise.resolve();
   const current = previous
@@ -80,4 +80,14 @@ export async function saveWorkspace(userId: string, workspace: Workspace): Promi
   } finally {
     if (writes.get(userId) === current) writes.delete(userId);
   }
+}
+
+export async function saveWorkspace(userId: string, workspace: Workspace): Promise<void> {
+  normalizeWorkspace(workspace as Workspace & Record<string, unknown>);
+  if (!hosted) {
+    localState = workspace;
+    saveLocal(workspace);
+    return;
+  }
+  await persistHosted(userId, workspace);
 }

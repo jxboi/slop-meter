@@ -11,16 +11,19 @@ import {
 } from 'lucide-react';
 import type { Finding, Repo } from '../types';
 import { Modal, Badge } from './ui';
+import { patternById } from '../slopTaxonomy';
 export function FindingDrawer({
   finding: f,
   repos,
   onClose,
   onStatus,
+  onGuide,
 }: {
   finding: Finding;
   repos: Repo[];
   onClose: () => void;
   onStatus: (id: string, status: Finding['status']) => Promise<void>;
+  onGuide: (patternId: Finding['patternId']) => void;
 }) {
   const [tab, setTab] = useState('Reasoning'),
     [copied, setCopied] = useState(false),
@@ -36,10 +39,14 @@ export function FindingDrawer({
           <FileCode2 size={15} />
           {repo?.owner}/{repo?.name}
           <span>·</span>
-          {f.category}
+          {f.dimension}
           {repo?.demo && <Badge>Sample</Badge>}
         </div>
         <h1>{f.title}</h1>
+        <button className="finding-pattern" onClick={() => onGuide(f.patternId)}>
+          {patternById.get(f.patternId)?.title || f.patternId}
+          <ArrowUpRight size={14} />
+        </button>
         <div className="drawer-badges">
           <Badge tone={f.severity === 'critical' ? 'red' : 'orange'}>{f.severity} severity</Badge>
           <Badge tone="green">Priority {f.score}/100</Badge>
