@@ -127,9 +127,12 @@ export function ScanModal({
     [profile, setProfile] = useState(
       data.profiles.find((p) => p.active)?.id || data.profiles[0]?.id,
     ),
+    [apiKey, setApiKey] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   const active = harnesses.find((h) => h.id === harness);
+  const apiHarness = harness === 'openai' || harness === 'anthropic';
+  const needsKey = Boolean(active?.requiresKey && !apiKey.trim());
   return (
     <Modal title="Understand your codebase" onClose={onClose}>
       <p className="modal-intro">One scan. A clearer picture of what to do next.</p>
@@ -161,6 +164,7 @@ export function ScanModal({
                   effort,
                   depth,
                   profileId: profile,
+                  apiKey: apiHarness ? apiKey.trim() || undefined : undefined,
                 }),
               );
             } catch (e) {
@@ -188,6 +192,7 @@ export function ScanModal({
                 onChange={(e) => {
                   setHarness(e.target.value);
                   setModel('');
+                  setApiKey('');
                 }}
               >
                 {harnesses.map((h) => (
@@ -210,6 +215,25 @@ export function ScanModal({
             </label>
           </div>
           <p className="field-help">{active?.detail}</p>
+          {apiHarness && (
+            <label>
+              {active?.configured ? 'API key (optional)' : 'API key'}
+              <input
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                required={active?.requiresKey}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={harness === 'openai' ? 'sk-…' : 'sk-ant-…'}
+              />
+              <span className="field-help">
+                {active?.configured
+                  ? 'Leave blank to use the server credential. A key entered here overrides it for this scan only.'
+                  : 'Used only for this scan. Slop Meter does not save it in your browser or workspace.'}
+              </span>
+            </label>
+          )}
           {harness !== 'static' && (
             <div className="form-columns">
               <label>
@@ -277,7 +301,7 @@ export function ScanModal({
             <button type="button" className="button" onClick={onClose}>
               Cancel
             </button>
-            <button className="button primary" disabled={busy || !active?.available}>
+            <button className="button primary" disabled={busy || !active?.available || needsKey}>
               <ScanLine size={16} />
               {busy ? 'Starting scan…' : 'Start scan'}
             </button>

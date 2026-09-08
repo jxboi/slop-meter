@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { get, put } from '@vercel/blob';
+import { BlobPreconditionFailedError, get, put } from '@vercel/blob';
 import { seed } from './seed.js';
 import type { Workspace } from '../src/types.js';
 import { normalizeWorkspace } from './migrate.js';
@@ -14,7 +14,6 @@ export const dataDir = hosted
 
 const localFilename = path.join(dataDir, 'workspace.json');
 let localState: Workspace | undefined;
-const writes = new Map<string, Promise<void>>();
 
 function recoverInterruptedScans(workspace: Workspace) {
   if (hosted) return workspace;
@@ -51,43 +50,80 @@ function workspacePath(userId: string) {
 
 export async function loadWorkspace(userId: string): Promise<Workspace> {
   if (!hosted) return loadLocal();
-  const result = await get(workspacePath(userId), { access: 'private', useCache: false });
-  if (!result || result.statusCode !== 200) return seed();
-  const workspace = JSON.parse(await new Response(result.stream).text()) as Workspace;
+  const result = await readHosted(userId);
+  if (!result) return seed();
+  const { workspace, etag } = result;
   if (normalizeWorkspace(workspace as Workspace & Record<string, unknown>)) {
-    await persistHosted(userId, workspace);
+    try {
+      await persistHosted(userId, workspace, etag);
+    } catch (error) {
+      if (!(error instanceof BlobPreconditionFailedError)) throw error;
+    }
   }
   return workspace;
 }
 
-async function persistHosted(userId: string, workspace: Workspace) {
-  const snapshot = JSON.stringify(workspace);
-  const previous = writes.get(userId) || Promise.resolve();
-  const current = previous
-    .catch(() => undefined)
-    .then(async () => {
-      await put(workspacePath(userId), snapshot, {
-        access: 'private',
-        addRandomSuffix: false,
-        allowOverwrite: true,
-        contentType: 'application/json',
-        cacheControlMaxAge: 60,
-      });
-    });
-  writes.set(userId, current);
-  try {
-    await current;
-  } finally {
-    if (writes.get(userId) === current) writes.delete(userId);
-  }
+async function readHosted(userId: string) {
+  const result = await get(workspacePath(userId), { access: 'private', useCache: false });
+  if (!result || result.statusCode !== 200) return null;
+  return {
+    workspace: JSON.parse(await new Response(result.stream).text()) as Workspace,
+    etag: result.blob.etag,
+  };
 }
 
-export async function saveWorkspace(userId: string, workspace: Workspace): Promise<void> {
-  normalizeWorkspace(workspace as Workspace & Record<string, unknown>);
+async function persistHosted(userId: string, workspace: Workspace, etag?: string) {
+  await put(workspacePath(userId), JSON.stringify(workspace), {
+    access: 'private',
+    addRandomSuffix: false,
+    ...(etag ? { ifMatch: etag } : { allowOverwrite: false }),
+    contentType: 'application/json',
+    cacheControlMaxAge: 60,
+  });
+}
+
+export async function optimisticUpdate<State, Result>(
+  read: () => Promise<{ state: State; version?: string }>,
+  write: (state: State, version?: string) => Promise<void>,
+  mutate: (state: State) => Result,
+  isConflict: (error: unknown, version?: string) => boolean,
+  attempts = 8,
+): Promise<Result> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const { state, version } = await read();
+    const result = mutate(state);
+    try {
+      await write(state, version);
+      return result;
+    } catch (error) {
+      if (!isConflict(error, version) || attempt === attempts - 1) throw error;
+    }
+  }
+  throw new Error('Optimistic update exhausted its retry budget.');
+}
+
+export async function updateWorkspace<T>(
+  userId: string,
+  mutate: (workspace: Workspace) => T,
+): Promise<T> {
   if (!hosted) {
+    const workspace = loadLocal();
+    const result = mutate(workspace);
+    normalizeWorkspace(workspace as Workspace & Record<string, unknown>);
     localState = workspace;
     saveLocal(workspace);
-    return;
+    return result;
   }
-  await persistHosted(userId, workspace);
+
+  return optimisticUpdate(
+    async () => {
+      const current = await readHosted(userId);
+      const state = current?.workspace || seed();
+      normalizeWorkspace(state as Workspace & Record<string, unknown>);
+      return { state, version: current?.etag };
+    },
+    (state, version) => persistHosted(userId, state, version),
+    mutate,
+    (error) => error instanceof BlobPreconditionFailedError,
+  );
 }

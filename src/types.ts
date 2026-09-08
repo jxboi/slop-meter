@@ -50,6 +50,7 @@ export interface Scan {
   repoId: string;
   repoName: string;
   startedAt: string;
+  updatedAt?: string;
   completedAt?: string;
   status: 'running' | 'completed' | 'failed' | 'cancelled';
   phase: string;
@@ -67,7 +68,26 @@ export interface Scan {
   knowledgeIds?: string[];
   commit?: string;
   findings?: Finding[];
+  usage?: ScanUsage;
   demo?: boolean;
+}
+export interface ScanUsage {
+  uncachedInputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
+  estimatedCostUsd?: number;
+  pricing?: {
+    version: string;
+    model: string;
+    inputPerMillion: number;
+    cachedInputPerMillion: number;
+    cacheWriteInputPerMillion: number;
+    outputPerMillion: number;
+    longContextThreshold?: number;
+    longContextInputMultiplier?: number;
+    longContextOutputMultiplier?: number;
+  };
 }
 export interface Profile {
   id: string;
@@ -103,4 +123,7 @@ export interface Harness {
   name: string;
   available: boolean;
   detail: string;
+  configured?: boolean;
+  supportsByok?: boolean;
+  requiresKey?: boolean;
 }

@@ -18,7 +18,7 @@ import { configureApiAuth } from './api';
 import { Loading, Logo } from './components/ui';
 
 const publishableKey = import.meta.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY as string | undefined;
-const clerkEnabled = import.meta.env.PROD && Boolean(publishableKey);
+const clerkEnabled = import.meta.env.VITE_HOSTED === 'true' && Boolean(publishableKey);
 
 function GitHubSignIn() {
   const clerk = useClerk();

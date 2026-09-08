@@ -78,7 +78,7 @@ export function SettingsPage({
       <section className="panel settings-panel">
         <SectionTitle
           title="Your AI, your choice"
-          subtitle="Connect through local CLIs or server-side API credentials."
+          subtitle="Connect through local subscriptions, a one-scan API key, or server credentials."
         />
         {harnesses.map((h) => (
           <div className="harness-row" key={h.id}>
@@ -90,14 +90,19 @@ export function SettingsPage({
               <p>{h.detail}</p>
             </div>
             <Badge tone={h.available ? 'green' : 'neutral'}>
-              {h.available ? 'Available' : 'Not configured'}
+              {h.supportsByok && !h.configured
+                ? 'Bring your key'
+                : h.available
+                  ? 'Available'
+                  : 'Not configured'}
             </Badge>
           </div>
         ))}
         <div className="info-box">
-          CLI availability confirms installation, not authentication. Sign in through your chosen
-          CLI before scanning. API credentials are read from the server environment and never sent
-          to the browser.
+          Codex and Claude availability includes their local sign-in status. Copilot availability
+          confirms installation; sign in through its CLI before scanning. OpenAI and Anthropic keys
+          can be supplied for one scan without being saved, or configured on the server as a
+          workspace-wide fallback.
         </div>
       </section>
     </div>

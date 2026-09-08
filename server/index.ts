@@ -6,9 +6,11 @@ import * as tar from 'tar';
 import { clerkMiddleware, getAuth } from '@clerk/express';
 import { waitUntil } from '@vercel/functions';
 import { z } from 'zod';
-import { dataDir, hosted, loadWorkspace, saveWorkspace } from './store.js';
+import { dataDir, hosted, loadWorkspace, updateWorkspace } from './store.js';
 import { inventory, baseline, healthScore } from './analyzer.js';
 import { diagnose, harnesses, run } from './providers.js';
+import { mergeScanUsage } from './cost.js';
+import { scanRequestSchema, splitScanRequest } from './scanRequest.js';
 import type { Knowledge, Repo, Scan, Workspace } from '../src/types.js';
 import { slopDimensions, patternById } from '../src/slopTaxonomy.js';
 
@@ -79,7 +81,32 @@ function publicWorkspace(state: Workspace) {
 }
 
 app.get('/api/workspace', async (_req, res) => {
-  const state = await loadWorkspace(userId(res));
+  const ownerId = userId(res);
+  let state = await loadWorkspace(ownerId);
+  const staleBefore = Date.now() - 6 * 60_000;
+  if (
+    hosted &&
+    state.scans.some(
+      (scan) =>
+        scan.status === 'running' && Date.parse(scan.updatedAt || scan.startedAt) < staleBefore,
+    )
+  ) {
+    state = await updateWorkspace(ownerId, (current) => {
+      for (const scan of current.scans) {
+        if (
+          scan.status === 'running' &&
+          Date.parse(scan.updatedAt || scan.startedAt) < staleBefore
+        ) {
+          scan.status = 'failed';
+          scan.phase = 'Interrupted';
+          scan.error = 'The hosted scan stopped before it could complete. Run it again.';
+          scan.updatedAt = new Date().toISOString();
+          scan.completedAt = scan.updatedAt;
+        }
+      }
+      return current;
+    });
+  }
   res.json(publicWorkspace(state));
 });
 
@@ -87,7 +114,6 @@ app.get('/api/harnesses', async (_req, res) => res.json(await harnesses()));
 
 app.post('/api/repos', async (req, res) => {
   const ownerId = userId(res);
-  const state = await loadWorkspace(ownerId);
   const input = z
     .object({ location: z.string().trim().min(1).max(2000), source: z.enum(['github', 'local']) })
     .parse(req.body);
@@ -112,8 +138,6 @@ app.post('/api/repos', async (req, res) => {
     name = path.basename(location);
     owner = 'local';
   }
-  if (state.repos.some((repo) => !repo.demo && repo.location === location))
-    throw new Error('This repository is already in your workspace.');
   const repo: Repo = {
     id: crypto.randomUUID(),
     name,
@@ -127,34 +151,38 @@ app.post('/api/repos', async (req, res) => {
     findings: [],
     trend: [],
   };
-  state.repos.push(repo);
-  await saveWorkspace(ownerId, state);
+  await updateWorkspace(ownerId, (state) => {
+    if (state.repos.some((item) => !item.demo && item.location === location))
+      throw new Error('This repository is already in your workspace.');
+    state.repos.push(repo);
+  });
   res.status(201).json(repo);
 });
 
 app.delete('/api/repos/:id', async (req, res) => {
   const ownerId = userId(res);
-  const state = await loadWorkspace(ownerId);
-  if (state.scans.some((scan) => scan.repoId === req.params.id && scan.status === 'running'))
-    throw new Error('Cancel the active scan before removing this repository.');
-  state.repos = state.repos.filter((repo) => repo.id !== req.params.id);
-  state.scans = state.scans.filter((scan) => scan.repoId !== req.params.id);
-  await saveWorkspace(ownerId, state);
+  await updateWorkspace(ownerId, (state) => {
+    if (state.scans.some((scan) => scan.repoId === req.params.id && scan.status === 'running'))
+      throw new Error('Cancel the active scan before removing this repository.');
+    state.repos = state.repos.filter((repo) => repo.id !== req.params.id);
+    state.scans = state.scans.filter((scan) => scan.repoId !== req.params.id);
+  });
   res.json({ ok: true });
 });
 
 app.patch('/api/findings/:id', async (req, res) => {
   const ownerId = userId(res);
-  const state = await loadWorkspace(ownerId);
   const { status } = z
     .object({ status: z.enum(['open', 'in-progress', 'resolved', 'deferred']) })
     .parse(req.body);
-  const finding = state.repos
-    .flatMap((repo) => repo.findings)
-    .find((item) => item.id === req.params.id);
+  const finding = await updateWorkspace(ownerId, (state) => {
+    const item = state.repos
+      .flatMap((repo) => repo.findings)
+      .find((candidate) => candidate.id === req.params.id);
+    if (item) item.status = status;
+    return item;
+  });
   if (!finding) return res.status(404).json({ error: 'Finding not found.' });
-  finding.status = status;
-  await saveWorkspace(ownerId, state);
   res.json(finding);
 });
 
@@ -175,29 +203,30 @@ const profileSchema = z.object({
 
 app.post('/api/profiles', async (req, res) => {
   const ownerId = userId(res);
-  const state = await loadWorkspace(ownerId);
   const profile = profileSchema.parse(req.body);
   const value = { ...profile, id: profile.id || crypto.randomUUID() };
-  if (value.active) state.profiles.forEach((item) => (item.active = false));
-  const index = state.profiles.findIndex((item) => item.id === value.id);
-  if (index >= 0) state.profiles[index] = value;
-  else state.profiles.push(value);
-  await saveWorkspace(ownerId, state);
+  await updateWorkspace(ownerId, (state) => {
+    if (value.active) state.profiles.forEach((item) => (item.active = false));
+    const index = state.profiles.findIndex((item) => item.id === value.id);
+    if (index >= 0) state.profiles[index] = value;
+    else state.profiles.push(value);
+  });
   res.json(value);
 });
 
 app.patch('/api/settings', async (req, res) => {
   const ownerId = userId(res);
-  const state = await loadWorkspace(ownerId);
-  state.settings = z
+  const settings = z
     .object({
       workspaceName: z.string().trim().min(1).max(80),
       defaultHarness: z.string(),
       defaultModel: z.string().max(150),
     })
     .parse(req.body);
-  await saveWorkspace(ownerId, state);
-  res.json(state.settings);
+  await updateWorkspace(ownerId, (state) => {
+    state.settings = settings;
+  });
+  res.json(settings);
 });
 
 async function refreshKnowledge(knowledge: Knowledge) {
@@ -248,7 +277,12 @@ app.post('/api/knowledge/refresh', async (_req, res) => {
   const ownerId = userId(res);
   const state = await loadWorkspace(ownerId);
   await Promise.all(state.knowledge.map(refreshKnowledge));
-  await saveWorkspace(ownerId, state);
+  await updateWorkspace(ownerId, (current) => {
+    for (const refreshed of state.knowledge) {
+      const index = current.knowledge.findIndex((item) => item.id === refreshed.id);
+      if (index >= 0) current.knowledge[index] = refreshed;
+    }
+  });
   res.json({ ok: true });
 });
 
@@ -295,64 +329,89 @@ async function downloadGitHubSnapshot(repo: Repo, root: string, signal: AbortSig
 
 app.post('/api/scans', async (req, res) => {
   const ownerId = userId(res);
-  const state = await loadWorkspace(ownerId);
-  const input = z
-    .object({
-      repoId: z.string(),
-      harness: z.enum(['static', 'codex', 'claude', 'copilot', 'openai', 'anthropic']),
-      model: z
-        .string()
-        .max(100)
-        .regex(/^[\w./:@-]*$/),
-      effort: z.enum(['low', 'medium', 'high']),
-      depth: z.enum(['quick', 'standard', 'deep']),
-      profileId: z.string(),
-    })
-    .parse(req.body);
-  const repo = state.repos.find((item) => item.id === input.repoId);
-  if (!repo) return res.status(404).json({ error: 'Repository not found.' });
-  if (repo.demo)
-    throw new Error('Sample repositories are illustrative. Add a real repository to run a scan.');
-  if (state.scans.some((scan) => scan.repoId === repo.id && scan.status === 'running'))
-    throw new Error('A scan is already running for this repository.');
-  if (state.scans.filter((scan) => scan.status === 'running').length >= 2)
-    throw new Error('Two scans are already running. Wait for one to finish.');
-  const profile = state.profiles.find((item) => item.id === input.profileId);
-  if (!profile) throw new Error('Choose an existing Slop Profile.');
-  if (!(await harnesses()).find((item) => item.id === input.harness)?.available)
+  const { apiKey, input } = splitScanRequest(scanRequestSchema.parse(req.body));
+  const selectedHarness = (await harnesses()).find((item) => item.id === input.harness);
+  if (!selectedHarness?.available)
     throw new Error('This harness is not configured. Check Settings.');
+  if (selectedHarness.requiresKey && !apiKey)
+    throw new Error(`Enter an API key to use ${selectedHarness.name} for this scan.`);
 
   const controller = new AbortController();
-  const scan: Scan = {
-    ...input,
-    id: crypto.randomUUID(),
-    repoName: `${repo.owner}/${repo.name}`,
-    startedAt: new Date().toISOString(),
-    status: 'running',
-    phase: 'Preparing repository',
-    progress: 3,
-    profileSnapshot: structuredClone(profile),
-    knowledgeIds: [],
-  };
+  const scanId = crypto.randomUUID();
+  const context = await updateWorkspace(ownerId, (state) => {
+    const repo = state.repos.find((item) => item.id === input.repoId);
+    if (!repo) return null;
+    if (repo.demo)
+      throw new Error('Sample repositories are illustrative. Add a real repository to run a scan.');
+    if (state.scans.some((scan) => scan.repoId === repo.id && scan.status === 'running'))
+      throw new Error('A scan is already running for this repository.');
+    if (state.scans.filter((scan) => scan.status === 'running').length >= 2)
+      throw new Error('Two scans are already running. Wait for one to finish.');
+    const profile = state.profiles.find((item) => item.id === input.profileId);
+    if (!profile) throw new Error('Choose an existing Slop Profile.');
+    const now = new Date().toISOString();
+    const scan: Scan = {
+      ...input,
+      id: scanId,
+      repoName: `${repo.owner}/${repo.name}`,
+      startedAt: now,
+      updatedAt: now,
+      status: 'running',
+      phase: 'Preparing repository',
+      progress: 3,
+      profileSnapshot: structuredClone(profile),
+      knowledgeIds: [],
+    };
+    state.scans.unshift(scan);
+    return {
+      scan: structuredClone(scan),
+      repo: structuredClone(repo),
+      profile: structuredClone(profile),
+      knowledge: structuredClone(state.knowledge),
+    };
+  });
+  if (!context) return res.status(404).json({ error: 'Repository not found.' });
+  const { scan, repo, profile, knowledge } = context;
   const jobId = `${ownerId}:${scan.id}`;
   jobs.set(jobId, controller);
-  state.scans.unshift(scan);
-  await saveWorkspace(ownerId, state);
   res.status(202).json(scan);
 
-  const update = (phase: string, progress: number) => {
+  const update = async (phase: string, progress: number) => {
     controller.signal.throwIfAborted();
-    scan.phase = phase;
-    scan.progress = progress;
-    void saveWorkspace(ownerId, state);
+    await updateWorkspace(ownerId, (state) => {
+      const current = state.scans.find((item) => item.id === scan.id);
+      if (!current || current.status !== 'running') {
+        controller.abort();
+        throw new DOMException('Scan cancelled', 'AbortError');
+      }
+      current.phase = phase;
+      current.progress = progress;
+      current.updatedAt = new Date().toISOString();
+    });
   };
   const task = (async () => {
     let root = repo.location;
+    let checkingCancellation = false;
+    const cancellationPoll = hosted
+      ? setInterval(async () => {
+          if (checkingCancellation || controller.signal.aborted) return;
+          checkingCancellation = true;
+          try {
+            const current = await loadWorkspace(ownerId);
+            const persisted = current.scans.find((item) => item.id === scan.id);
+            if (!persisted || persisted.status === 'cancelled') controller.abort();
+          } catch {
+            // A transient status-read failure must not stop the scan.
+          } finally {
+            checkingCancellation = false;
+          }
+        }, 2000)
+      : undefined;
     try {
       if (repo.source === 'github') {
         root = path.join(dataDir, 'repositories', repo.id, scan.id);
         await fs.mkdir(path.dirname(root), { recursive: true });
-        update('Downloading repository snapshot', 8);
+        await update('Downloading repository snapshot', 8);
         if (hosted) {
           await downloadGitHubSnapshot(repo, root, controller.signal);
         } else {
@@ -373,7 +432,7 @@ app.post('/api/scans', async (req, res) => {
           );
         }
       }
-      update('Mapping files and dependencies', 15);
+      await update('Mapping files and dependencies', 15);
       if (!hosted) {
         try {
           scan.commit = (
@@ -387,13 +446,13 @@ app.post('/api/scans', async (req, res) => {
       let findings;
       let coverage;
       if (input.harness === 'static') {
-        update('Inspecting baseline signals', 45);
+        await update('Inspecting baseline signals', 45);
         findings = baseline(files, repo.id, profile);
         coverage = `${files.length} source files inspected; ${skipped} entries excluded. Limited structural and lexical baseline. A high score is not assurance of security or correctness. Use an AI harness for contextual diagnosis.`;
       } else {
-        update('Refreshing authoritative knowledge', 20);
+        await update('Refreshing authoritative knowledge', 20);
         await Promise.all(
-          state.knowledge
+          knowledge
             .filter(
               (knowledge) =>
                 !knowledge.fetchedAt || Date.now() - Date.parse(knowledge.fetchedAt) > 86_400_000,
@@ -404,19 +463,25 @@ app.post('/api/scans', async (req, res) => {
           files,
           repo.id,
           profile,
-          state.knowledge,
-          { ...input, signal: controller.signal },
+          knowledge,
+          {
+            ...input,
+            apiKey,
+            signal: controller.signal,
+            onUsage: async (usage) => {
+              await updateWorkspace(ownerId, (state) => {
+                const current = state.scans.find((item) => item.id === scan.id);
+                if (current) current.usage = mergeScanUsage(current.usage, usage);
+              });
+            },
+          },
           input.depth,
           update,
         );
         findings = result.findings;
         coverage = result.coverage;
       }
-      update('Prioritizing the refactoring roadmap', 90);
-      for (const finding of findings) {
-        const previous = repo.findings.find((item) => item.id === finding.id);
-        if (previous && previous.status !== 'resolved') finding.status = previous.status;
-      }
+      await update('Prioritizing the refactoring roadmap', 90);
       const manifest = files.find((file) => file.path === 'package.json');
       let stack = 'Source repository';
       if (manifest) {
@@ -440,39 +505,60 @@ app.post('/api/scans', async (req, res) => {
       const now = new Date().toISOString();
       const health = healthScore(findings);
       controller.signal.throwIfAborted();
-      Object.assign(repo, {
-        files: files.length,
-        stack,
-        health,
-        lastScan: now,
-        findings,
-        analysis: { harness: input.harness, coverage },
+      await updateWorkspace(ownerId, (state) => {
+        const currentRepo = state.repos.find((item) => item.id === repo.id);
+        const currentScan = state.scans.find((item) => item.id === scan.id);
+        if (!currentRepo || !currentScan || currentScan.status !== 'running') {
+          controller.abort();
+          throw new DOMException('Scan cancelled', 'AbortError');
+        }
+        for (const finding of findings) {
+          const previous = currentRepo.findings.find((item) => item.id === finding.id);
+          if (previous && previous.status !== 'resolved') finding.status = previous.status;
+        }
+        Object.assign(currentRepo, {
+          files: files.length,
+          stack,
+          health,
+          lastScan: now,
+          findings,
+          analysis: { harness: input.harness, coverage },
+        });
+        currentRepo.trend.push({ date: now, value: health });
+        for (const refreshed of knowledge) {
+          const index = state.knowledge.findIndex((item) => item.id === refreshed.id);
+          if (index >= 0) state.knowledge[index] = refreshed;
+        }
+        Object.assign(currentScan, {
+          status: 'completed',
+          phase: 'Complete',
+          progress: 100,
+          updatedAt: now,
+          completedAt: now,
+          commit: scan.commit,
+          health,
+          findingCount: findings.reduce((sum, finding) => sum + finding.findings, 0),
+          coverage,
+          findings: structuredClone(findings),
+          knowledgeIds:
+            input.harness === 'static'
+              ? []
+              : knowledge.filter((item) => item.content).map((item) => `${item.id}@${item.hash}`),
+        });
       });
-      repo.trend.push({ date: now, value: health });
-      Object.assign(scan, {
-        status: 'completed',
-        phase: 'Complete',
-        progress: 100,
-        completedAt: now,
-        health,
-        findingCount: findings.reduce((sum, finding) => sum + finding.findings, 0),
-        coverage,
-        findings: structuredClone(findings),
-        knowledgeIds:
-          input.harness === 'static'
-            ? []
-            : state.knowledge
-                .filter((knowledge) => knowledge.content)
-                .map((knowledge) => `${knowledge.id}@${knowledge.hash}`),
-      });
-      await saveWorkspace(ownerId, state);
     } catch (error) {
-      scan.status = controller.signal.aborted ? 'cancelled' : 'failed';
-      scan.phase = scan.status === 'cancelled' ? 'Cancelled' : 'Scan failed';
-      scan.error = (error as Error).message;
-      scan.completedAt = new Date().toISOString();
-      await saveWorkspace(ownerId, state);
+      const cancelled = controller.signal.aborted || (error as Error).name === 'AbortError';
+      await updateWorkspace(ownerId, (state) => {
+        const current = state.scans.find((item) => item.id === scan.id);
+        if (!current || current.status === 'cancelled') return;
+        current.status = cancelled ? 'cancelled' : 'failed';
+        current.phase = cancelled ? 'Cancelled' : 'Scan failed';
+        current.error = cancelled ? undefined : (error as Error).message;
+        current.updatedAt = new Date().toISOString();
+        current.completedAt = current.updatedAt;
+      });
     } finally {
+      if (cancellationPoll) clearInterval(cancellationPoll);
       jobs.delete(jobId);
       if (repo.source === 'github')
         await fs.rm(root, { recursive: true, force: true }).catch(() => undefined);
@@ -484,16 +570,18 @@ app.post('/api/scans', async (req, res) => {
 
 app.post('/api/scans/:id/cancel', async (req, res) => {
   const ownerId = userId(res);
-  const state = await loadWorkspace(ownerId);
-  const scan = state.scans.find((item) => item.id === req.params.id);
+  const scan = await updateWorkspace(ownerId, (state) => {
+    const current = state.scans.find((item) => item.id === req.params.id);
+    if (current?.status === 'running') {
+      current.status = 'cancelled';
+      current.phase = 'Cancelled';
+      current.updatedAt = new Date().toISOString();
+      current.completedAt = current.updatedAt;
+    }
+    return current;
+  });
   if (!scan) return res.status(404).json({ error: 'Scan not found.' });
   jobs.get(`${ownerId}:${scan.id}`)?.abort();
-  if (scan.status === 'running') {
-    scan.status = 'cancelled';
-    scan.phase = 'Cancelled';
-    scan.completedAt = new Date().toISOString();
-    await saveWorkspace(ownerId, state);
-  }
   res.json({ ok: true });
 });
 

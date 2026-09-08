@@ -45,7 +45,7 @@ Hosted scans accept public GitHub repositories. Local-directory repositories and
 - Multiple GitHub and local repositories, with search and source filters.
 - A usable sample workspace, explicitly labeled. Sample repositories cannot be scanned; add a real repository to analyze your own code.
 - Real local baseline scans without an AI account. These inspect oversized modules, dynamic execution, silent failures, missing test filenames, and identical source files. Baseline signals are deliberately limited and phrased as review hypotheses.
-- AI discovery through Codex, Claude Code, GitHub Copilot CLI, OpenAI API, or Anthropic API. Category names are open-ended; the AI is not constrained to the baseline checklist.
+- AI discovery through Codex, Claude Code, GitHub Copilot CLI, OpenAI API, or Anthropic API. OpenAI and Anthropic support a private key supplied for one scan or a server-configured credential. Category names are open-ended; the AI is not constrained to the baseline checklist.
 - Harness, model, thinking-effort, scan-depth, and Slop Profile selection. Copilot controls its own reasoning effort; its effort control is disabled.
 - Repository inventory, bounded source batches, and a final cross-batch synthesis into root causes.
 - Evidence drawers with actual source snippets, line numbers, rationale, confidence, effort, dependencies, citations, and step-by-step action plans.
@@ -53,6 +53,7 @@ Hosted scans accept public GitHub repositories. Local-directory repositories and
 - Roadmap stages: start here, up next, intentionally later, and resolved.
 - Decision status tracking and Markdown roadmap export. Refactoring happens in your editor or harness; Slop Meter never changes the repository's source files.
 - Rescans update health and trends while preserving each scan's findings, profile snapshot, source commit when available, knowledge fingerprints, and scope.
+- OpenAI and Anthropic API scans capture provider-reported token usage and show estimated scan cost and cost per cited finding in history. Estimates use a versioned standard-rate snapshot; taxes, negotiated pricing, subscriptions, and billing adjustments are excluded. Local baseline scans cost $0, while CLI subscription scans and unknown custom models show cost as unavailable.
 - Current authoritative documentation retrieval, freshness timestamps, content fingerprints, failure states, and same-host redirect handling. Cached guidance is refreshed before an AI scan when older than 24 hours. Installed dependency manifests are supplied to the model for version/context matching.
 - Custom profiles, presets, natural-language instructions, team rules, and adjustable dimension emphasis.
 - A built-in Common AI Slop rubric: 40 concrete patterns normalized into eight dimensions, with Repository Fit emphasized and a searchable in-app guide.
@@ -60,7 +61,7 @@ Hosted scans accept public GitHub repositories. Local-directory repositories and
 
 ## Harness setup
 
-Settings shows whether each CLI is installed or an API credential is present. Installation detection does not verify authentication.
+Settings verifies both installation and local subscription sign-in for Codex and Claude Code. Copilot detection verifies installation. OpenAI and Anthropic can use a key entered for one scan, with an optional server credential as the fallback.
 
 | Harness        | Requirement                                   | Execution                                                               |
 | -------------- | --------------------------------------------- | ----------------------------------------------------------------------- |
@@ -68,10 +69,10 @@ Settings shows whether each CLI is installed or an API credential is present. In
 | Codex          | Installed, authenticated `codex` CLI          | Noninteractive, read-only sandbox, isolated temporary working directory |
 | Claude Code    | Installed, authenticated `claude` CLI         | Print mode, safe mode, tools disabled, no session persistence           |
 | GitHub Copilot | Installed, authenticated `copilot` CLI        | Prompt mode, tool access denied                                         |
-| OpenAI API     | `OPENAI_API_KEY` in the server environment    | Responses API; default `gpt-5.4`                                        |
-| Anthropic API  | `ANTHROPIC_API_KEY` in the server environment | Messages API; default `claude-sonnet-4-6`                               |
+| OpenAI API     | Per-scan key or server `OPENAI_API_KEY`        | Responses API; default `gpt-5.4`                                        |
+| Anthropic API  | Per-scan key or server `ANTHROPIC_API_KEY`     | Messages API; default `claude-sonnet-4-6`                               |
 
-Use your normal CLI sign-in flow. Set API credentials in your terminal or process manager before starting the server. Credentials are never entered into the browser, returned by the API, or written to the workspace database. `.env` files are not automatically loaded. Model names can be customized in Settings or the scan dialog; availability and effort support depend on the selected provider/model.
+Use your normal CLI sign-in flow. For API harnesses, enter your own key in the scan dialog or set a shared credential in your terminal or process manager before starting the server. A key entered in the dialog is sent only with that scan request, held in memory while the scan runs, and is not written to browser storage, returned by the API, logged by the application, or saved in the workspace database. It overrides the server credential for that scan. `.env` files are not automatically loaded. Model names can be customized in Settings or the scan dialog; availability and effort support depend on the selected provider/model.
 
 CLI behavior follows the locally installed versions. API integrations follow the [OpenAI Responses API](https://developers.openai.com/api/reference/resources/responses/methods/create), [Anthropic Messages API](https://platform.claude.com/docs/en/api/messages/create), and [GitHub Copilot CLI reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference).
 
@@ -91,6 +92,8 @@ Inventory is bounded to 10,000 files, 30 MB of content, 200 KB per file, and 100
 
 Each source file contributes at most 25,000 characters; the inventory prompt is capped at 70,000 characters. One synthesis call follows when multiple batches are used. Provider context limits may require choosing a shallower depth. Costs are charged through the selected harness/account. Limits bound work but do not make very large scans exhaustive.
 
+Hosted execution is still bounded by Vercel's five-minute function duration. Persisted progress and cancellation survive requests handled by different function instances, but an interrupted scan restarts from the beginning rather than resuming an individual source batch. Prefer quick scans for large hosted repositories until scan execution is moved to a dedicated durable worker.
+
 AI responses must satisfy a validated JSON contract. Evidence paths and line numbers must exist in the inventory; rendered snippets are taken from the actual source rather than trusting model-generated code. Unverified citation URLs are discarded. Counts for real AI scans represent cited evidence, not invented totals. Conclusions still require engineering review: a valid source location does not prove the interpretation is correct.
 
 The initial knowledge library contains OWASP, React, Next.js, Express, and TypeScript documentation. The content evolves through refreshes; automatic discovery of arbitrary new sources and full semantic version pinning are future extensions. Dependency versions and source dates inform the AI, but applicability is not a mechanically verified fact. This release does not include an exhaustive package-advisory scanner, autonomous code changes, pull request creation, or team authentication.
@@ -101,13 +104,13 @@ Local GitHub scans use a fresh shallow clone of the default branch and may use e
 
 Locally, all application state is saved atomically to `.data/workspace.json` with owner-only file permissions. `.data` is ignored by Git. Back up that file to retain repositories, scans, profiles, settings, and cached documentation.
 
-On Vercel, each authenticated user receives an isolated workspace stored as a private Blob object under an opaque user-derived key. Workspace APIs require a valid Clerk session, and same-origin checks protect state-changing requests.
+On Vercel, each authenticated user receives an isolated workspace stored as a private Blob object under an opaque user-derived key. Workspace APIs require a valid Clerk session, and same-origin checks protect state-changing requests. Blob updates use ETag preconditions and retry on conflicts so concurrent requests do not silently overwrite each other. Cancellation is persisted and polled by the active worker, allowing a request handled by another function instance to stop the scan. Hosted scans that stop updating are marked interrupted instead of remaining stuck indefinitely.
 
 - `SLOP_DATA_DIR`: alternate data directory; useful for isolated tests.
 - `PORT`: API port, default 4310. If changed during development, also change the Vite API proxy target.
-- API credentials: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
+- Optional shared API credentials: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`. Per-scan keys require no environment variable.
 
-A restart marks unfinished scans as interrupted rather than leaving permanent progress indicators. Two scans may run at once. Removing a repository removes its application records and history, not the original source directory.
+A local restart marks unfinished scans as interrupted immediately. Hosted scans are marked interrupted after six minutes without a progress update. Two scans may run at once. Removing a repository removes its application records and history, not the original source directory.
 
 ## Implementation
 
@@ -127,13 +130,35 @@ React 19 + TypeScript + Vite, Express 5, Clerk, private Vercel Blob storage, Zod
 npm run check
 npm test
 npm run build
+npm run test:e2e
 ```
 
-The automated suite covers exclusions and secret redaction, nested ignore rules, cancellation, grouped evidence, conservative architecture signals, dependency cycles, profile-sensitive prioritization, health bounds, malformed model responses, actual-source snippet substitution, and a real API workflow:
+The automated suite covers exclusions and secret redaction, nested ignore rules, cancellation, grouped evidence, conservative architecture signals, dependency cycles, profile-sensitive prioritization, health bounds, malformed model responses, actual-source snippet substitution, ephemeral BYOK handling, and a real API workflow:
 
 **Add local repository → scan → inspect evidence → resolve → modify fixture → rescan → compare health → export → verify immutable historical findings and disk persistence.**
 
-A live Codex invocation was also verified against a synthetic three-line fixture. It identified the unsafe parser and returned valid, source-linked JSON. Other provider adapters are implemented but have not all been authenticated and exercised live in this environment.
+The Playwright suite builds the production application with a Clerk key present and verifies that local mode still opens without hosted sign-in. It then adds the current repository, completes a baseline scan, and opens the resulting engineering decision.
+
+Real Codex and Claude Code adapters can be checked without adding live calls to the normal suite:
+
+```sh
+npm run test:providers -- codex
+npm run test:providers -- claude
+```
+
+The smoke test requires the corresponding local CLI subscription to be signed in. It scans a five-line synthetic fixture and accepts only validated, source-linked results. Codex and Claude auth state is also reflected in Settings.
+
+An opt-in hosted test covers authenticated workspace loading, public repository addition, baseline scanning, Blob persistence, and cleanup. Use a dedicated test account, capture its browser state interactively, and supply a public disposable repository:
+
+```sh
+npx playwright codegen --save-storage=playwright/.auth/hosted.json https://slop-meter.vercel.app
+SLOP_METER_HOSTED_URL=https://slop-meter.vercel.app \
+SLOP_METER_AUTH_STATE=playwright/.auth/hosted.json \
+SLOP_METER_E2E_REPO=https://github.com/owner/public-test-repo \
+npm run test:e2e:hosted
+```
+
+The authenticated browser state is ignored by Git and must never be committed. API adapters beyond the locally exercised CLI providers still require credentials and live verification in their deployment environment.
 
 The rendered application was tested in the Codex in-app browser. Evidence tabs, action plans, roadmap dependencies, adding a local repository, completing a real baseline scan, profile persistence, history, and all five documentation refreshes were exercised. Desktop visual captures use the installed agent-browser verifier because enlarged in-app screenshots clipped the viewport. Mobile was checked at 390 × 844 with no document-level horizontal overflow. The generated design reference is `docs/design-concept.png`.
 

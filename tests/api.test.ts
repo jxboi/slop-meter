@@ -108,11 +108,28 @@ test('real API: add local repo → scan → evidence → resolve → refactor �
     assert.equal(final.health, 100);
     assert.equal(final.findings.length, 0);
     assert.equal(final.trend.length, 2);
+
+    const manyFiles = path.join(repo, 'many-files');
+    await fs.mkdir(manyFiles);
+    await Promise.all(
+      Array.from({ length: 500 }, (_, index) =>
+        fs.writeFile(path.join(manyFiles, `module-${index}.ts`), `export const value = ${index};`),
+      ),
+    );
+    const cancellable = await request('/scans', 'POST', input);
+    assert.equal(cancellable.status, 202);
+    assert.equal((await request(`/scans/${cancellable.body.id}/cancel`, 'POST')).status, 200);
+    assert.equal((await finish(cancellable.body.id)).status, 'cancelled');
+    const afterCancellation = (await request('/workspace')).body.repos.find(
+      (r: { id: string }) => r.id === id,
+    );
+    assert.equal(afterCancellation.trend.length, 2, 'a cancelled scan must not update repository');
+
     const exportResponse = await fetch(url + '/api/export/' + id);
     assert.equal(exportResponse.status, 200);
     assert.match(await exportResponse.text(), /Refactoring roadmap/);
     const stored = JSON.parse(await fs.readFile(path.join(data, 'workspace.json'), 'utf8'));
-    assert.equal(stored.scans.filter((s: { repoId: string }) => s.repoId === id).length, 2);
+    assert.equal(stored.scans.filter((s: { repoId: string }) => s.repoId === id).length, 3);
     assert.equal(
       stored.scans.find((s: { id: string }) => s.id === first.body.id).findings.length,
       2,

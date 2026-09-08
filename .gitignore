@@ -7,3 +7,6 @@ dist/
 .vercel
 .env*
 .vercel-build/
+playwright/.auth/
+playwright-report/
+test-results/

@@ -13,5 +13,5 @@
     "strict": true,
     "types": ["node", "vite/client"]
   },
-  "include": ["src", "server", "api", "tests", "vite.config.ts"]
+  "include": ["src", "server", "api", "tests", "e2e", "vite.config.ts", "playwright.config.ts"]
 }

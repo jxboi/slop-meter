@@ -8,9 +8,13 @@
     "build": "tsc -b && vite build && tsc -p tsconfig.server.json",
     "start": "tsx server/index.ts",
     "test": "tsx --test tests/*.test.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:hosted": "playwright test e2e/hosted-auth.spec.ts",
+    "test:providers": "tsx tests/provider-smoke.ts",
     "check": "tsc -b",
-    "format": "prettier --write src server tests",
-    "format:check": "prettier --check src server tests"
+    "verify": "npm run check && npm test && npm run format:check && npm run build",
+    "format": "prettier --write src server tests e2e *.ts",
+    "format:check": "prettier --check src server tests e2e *.ts"
   },
   "dependencies": {
     "@clerk/express": "^2.1.66",
@@ -27,6 +31,7 @@
     "zod": "^4.1.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/express": "^5.0.3",
     "@types/node": "^22.18.0",
     "@types/react": "^19.1.12",

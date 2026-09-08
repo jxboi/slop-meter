@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { inventory, baseline, rank, redact, healthScore } from '../server/analyzer';
 import { parseResult, diagnose } from '../server/providers';
+import type { ScanUsage } from '../src/types';
 import { profiles, seed } from '../server/seed';
 import { normalizeWorkspace } from '../server/migrate';
 import { patternById, slopDimensions, slopPatterns } from '../src/slopTaxonomy';
@@ -173,7 +174,7 @@ test('model results reject invented patterns and dimension mismatches', () => {
 test('AI adapter validates evidence and replaces model snippets with actual source lines', async () => {
   const originalFetch = globalThis.fetch,
     originalKey = process.env.OPENAI_API_KEY;
-  process.env.OPENAI_API_KEY = 'unit-test-key';
+  process.env.OPENAI_API_KEY = 'server-unit-test-key';
   const f = seed().repos[0].findings[0];
   const payload = {
     findings: [
@@ -194,10 +195,20 @@ test('AI adapter validates evidence and replaces model snippets with actual sour
     ],
   };
   let requestBody: Record<string, unknown> = {};
+  let authorization = '';
+  let capturedUsage: ScanUsage | undefined;
   globalThis.fetch = async (_url, init) => {
     requestBody = JSON.parse(init!.body as string);
+    authorization = new Headers(init?.headers).get('Authorization') || '';
     return new Response(
-      JSON.stringify({ output: [{ content: [{ text: JSON.stringify(payload) }] }] }),
+      JSON.stringify({
+        output: [{ content: [{ text: JSON.stringify(payload) }] }],
+        usage: {
+          input_tokens: 1_000,
+          input_tokens_details: { cached_tokens: 100 },
+          output_tokens: 200,
+        },
+      }),
       { status: 200 },
     );
   };
@@ -211,7 +222,11 @@ test('AI adapter validates evidence and replaces model snippets with actual sour
         harness: 'openai',
         model: 'test-model',
         effort: 'high',
+        apiKey: 'byok-unit-test-key',
         signal: new AbortController().signal,
+        onUsage: (usage) => {
+          capturedUsage = usage;
+        },
       },
       'quick',
       () => {},
@@ -220,6 +235,13 @@ test('AI adapter validates evidence and replaces model snippets with actual sour
     assert.equal(result.findings[0].evidence[0].snippet, 'const y = 2;');
     assert.deepEqual(result.findings[0].sources, []);
     assert.deepEqual(requestBody.reasoning, { effort: 'high' });
+    assert.equal(authorization, 'Bearer byok-unit-test-key');
+    assert.deepEqual(capturedUsage, {
+      uncachedInputTokens: 900,
+      cachedInputTokens: 100,
+      cacheWriteInputTokens: 0,
+      outputTokens: 200,
+    });
     assert.match(String(requestBody.input), /BUILT-IN SLOP RUBRIC/);
     assert.match(String(requestBody.input), /Repository Fit/);
     assert.match(result.coverage, /1 of 1/);

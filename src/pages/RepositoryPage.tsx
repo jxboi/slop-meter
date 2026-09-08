@@ -4,6 +4,7 @@ import type { Repo, Finding } from '../types';
 import { api, relative } from '../api';
 import { PriorityList } from '../components/Priorities';
 import { HealthChart } from '../components/HealthChart';
+import { ComplexityHeatMap } from '../components/ComplexityHeatMap';
 import { Badge, SectionTitle } from '../components/ui';
 
 export function RepositoryPage({
@@ -71,7 +72,7 @@ export function RepositoryPage({
         </div>
       )}
       <div className="tabs page-tabs">
-        {['Priorities', 'Health trend', 'Repository details'].map((t) => (
+        {['Priorities', 'Complexity map', 'Health trend', 'Repository details'].map((t) => (
           <button key={t} className={t === tab ? 'active' : ''} onClick={() => setTab(t)}>
             {t}
           </button>
@@ -98,6 +99,9 @@ export function RepositoryPage({
             profile for meaningful trends.
           </div>
         </div>
+      )}
+      {tab === 'Complexity map' && (
+        <ComplexityHeatMap findings={repo.findings} onSelect={onFinding} />
       )}
       {tab === 'Repository details' && (
         <section className="panel detail-settings">

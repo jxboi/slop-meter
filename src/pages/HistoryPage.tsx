@@ -5,6 +5,7 @@ import type { Profile, Harness, Scan } from '../types';
 import { post, relative } from '../api';
 import { Badge, Empty, Modal } from '../components/ui';
 import { patternById } from '../slopTaxonomy';
+import { costPerFindingUsd, formatUsd, scanCostUsd } from '../scanCost';
 type Shared = {
   data: Workspace;
   refresh: () => Promise<void>;
@@ -39,6 +40,8 @@ export function HistoryPage({ data, refresh, notify }: Shared) {
               <th>Harness & model</th>
               <th>Depth</th>
               <th>Health</th>
+              <th>Scan cost</th>
+              <th>Cost / finding</th>
               <th>Started</th>
               <th />
             </tr>
@@ -72,6 +75,8 @@ export function HistoryPage({ data, refresh, notify }: Shared) {
                 </td>
                 <td className="capitalize">{s.depth}</td>
                 <td>{s.health ?? '—'}</td>
+                <td>{formatUsd(scanCostUsd(s))}</td>
+                <td>{formatUsd(costPerFindingUsd(s))}</td>
                 <td className="muted">{relative(s.startedAt)}</td>
                 <td>
                   {s.status === 'running' ? (
@@ -131,7 +136,36 @@ export function HistoryPage({ data, refresh, notify }: Shared) {
               <dd>{selected.commit?.slice(0, 12) || 'Local working tree / sample'}</dd>
               <dt>Knowledge snapshot</dt>
               <dd>{selected.knowledgeIds?.join(', ') || 'No live sources used'}</dd>
+              <dt>Estimated scan cost</dt>
+              <dd>{formatUsd(scanCostUsd(selected))}</dd>
+              <dt>Cost / cited finding</dt>
+              <dd>{formatUsd(costPerFindingUsd(selected))}</dd>
+              {selected.usage && (
+                <>
+                  <dt>API token usage</dt>
+                  <dd>
+                    {selected.usage.uncachedInputTokens.toLocaleString()} input ·{' '}
+                    {selected.usage.cachedInputTokens.toLocaleString()} cached ·{' '}
+                    {selected.usage.outputTokens.toLocaleString()} output
+                  </dd>
+                  <dt>Pricing snapshot</dt>
+                  <dd>
+                    {selected.usage.pricing
+                      ? `${selected.usage.pricing.model} · ${selected.usage.pricing.version}`
+                      : 'Unavailable for this model'}
+                  </dd>
+                </>
+              )}
             </dl>
+            {scanCostUsd(selected) !== null && (
+              <p className="cost-note">
+                Estimated from provider-reported usage and standard USD rates. Taxes, negotiated
+                pricing, subscriptions, and billing adjustments are excluded.
+                {selected.status === 'completed' && selected.findingCount === 0
+                  ? ' No cited findings were returned, so the full scan cost is shown per finding.'
+                  : ''}
+              </p>
+            )}
             {selected.error && <div className="form-error">{selected.error}</div>}
             <div className="info-box">{selected.coverage || selected.phase}</div>
             {selected.findings && (

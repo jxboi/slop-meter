@@ -3,9 +3,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import type { Harness, Finding, Profile, Knowledge } from '../src/types.js';
+import type { Harness, Finding, Profile, Knowledge, ScanUsage } from '../src/types.js';
 import type { SourceFile } from './analyzer.js';
 import { rank } from './analyzer.js';
+import { apiUsage } from './cost.js';
 import {
   patternById,
   patternsByDimension,
@@ -27,7 +28,9 @@ export function run(
     let stdout = '',
       stderr = '';
     let overflow = false;
+    let timedOut = false;
     const timeout = setTimeout(() => {
+      timedOut = true;
       child.kill('SIGTERM');
     }, opts.timeout || 240000);
     child.stdout.on('data', (data) => {
@@ -51,7 +54,9 @@ export function run(
           new Error(
             overflow
               ? 'Harness output exceeded the safe limit.'
-              : `Harness exited ${code ?? 'after timeout'}. ${stderr.slice(-600)}`,
+              : timedOut
+                ? 'Harness timed out before returning a diagnosis.'
+                : `Harness exited ${code ?? 'unexpectedly'}. ${(stderr || stdout).trim().slice(-600)}`,
           ),
         );
       else resolve(stdout);
@@ -74,6 +79,21 @@ export async function harnesses(): Promise<Harness[]> {
           }
         }),
       );
+  const authenticated = hosted
+    ? [false, false, false]
+    : await Promise.all([
+        installed[0]
+          ? run('codex', ['login', 'status'], { timeout: 5000 })
+              .then(() => true)
+              .catch(() => false)
+          : false,
+        installed[1]
+          ? run('claude', ['auth', 'status'], { timeout: 5000 })
+              .then((output) => Boolean(JSON.parse(output).loggedIn))
+              .catch(() => false)
+          : false,
+        installed[2],
+      ]);
   return [
     {
       id: 'static',
@@ -84,9 +104,11 @@ export async function harnesses(): Promise<Harness[]> {
     ...['codex', 'claude', 'copilot'].map((id, i) => ({
       id,
       name: ['Codex', 'Claude Code', 'GitHub Copilot'][i],
-      available: installed[i],
+      available: installed[i] && authenticated[i],
       detail: installed[i]
-        ? 'Installed · uses your existing CLI authentication'
+        ? authenticated[i]
+          ? 'Installed · authenticated with your local subscription'
+          : `Installed · sign in with ${id === 'claude' ? 'claude auth login' : `${id} login`}`
         : hosted
           ? 'CLI harnesses are available only in local mode'
           : 'CLI not found on this machine',
@@ -94,18 +116,24 @@ export async function harnesses(): Promise<Harness[]> {
     {
       id: 'openai',
       name: 'OpenAI API',
-      available: !!process.env.OPENAI_API_KEY,
+      available: true,
+      configured: !!process.env.OPENAI_API_KEY,
+      supportsByok: true,
+      requiresKey: !process.env.OPENAI_API_KEY,
       detail: process.env.OPENAI_API_KEY
-        ? 'API key configured'
-        : 'Set OPENAI_API_KEY on the server',
+        ? 'Server credential available. You can optionally use your own key for one scan.'
+        : 'Enter your OpenAI API key for this scan. It will not be saved.',
     },
     {
       id: 'anthropic',
       name: 'Anthropic API',
-      available: !!process.env.ANTHROPIC_API_KEY,
+      available: true,
+      configured: !!process.env.ANTHROPIC_API_KEY,
+      supportsByok: true,
+      requiresKey: !process.env.ANTHROPIC_API_KEY,
       detail: process.env.ANTHROPIC_API_KEY
-        ? 'API key configured'
-        : 'Set ANTHROPIC_API_KEY on the server',
+        ? 'Server credential available. You can optionally use your own key for one scan.'
+        : 'Enter your Anthropic API key for this scan. It will not be saved.',
     },
   ];
 }
@@ -167,23 +195,30 @@ interface Options {
   model: string;
   effort: string;
   signal: AbortSignal;
+  apiKey?: string;
+  onUsage?: (usage: ScanUsage) => void | Promise<void>;
 }
 async function generate(prompt: string, options: Options) {
-  const { harness, model, effort, signal } = options;
+  const { harness, model, effort, signal, apiKey } = options;
   if (harness === 'openai' || harness === 'anthropic') {
     const openai = harness === 'openai',
-      key = process.env[openai ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY'];
-    if (!key) throw new Error('The selected API key is not configured on the server.');
+      environmentKey = openai ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY',
+      key = apiKey || process.env[environmentKey];
+    if (!key)
+      throw new Error(
+        `Enter an API key for this scan or configure ${environmentKey} on the server.`,
+      );
+    const selectedModel = model || (openai ? 'gpt-5.4' : 'claude-sonnet-4-6');
     const body = openai
       ? {
-          model: model || 'gpt-5.4',
+          model: selectedModel,
           input: prompt,
           reasoning: { effort },
           text: { format: { type: 'json_object' } },
           max_output_tokens: 14000,
         }
       : {
-          model: model || 'claude-sonnet-4-6',
+          model: selectedModel,
           max_tokens: 14000,
           messages: [{ role: 'user', content: prompt }],
           thinking: { type: 'adaptive' },
@@ -209,6 +244,7 @@ async function generate(prompt: string, options: Options) {
         `${openai ? 'OpenAI' : 'Anthropic'} returned HTTP ${response.status}. Check model access, credentials, and quota.`,
       );
     const json = await response.json();
+    await options.onUsage?.(apiUsage(openai ? 'openai' : 'anthropic', selectedModel, json.usage));
     return openai
       ? json.output
           ?.flatMap((o: { content?: { text?: string }[] }) => o.content || [])
@@ -289,7 +325,7 @@ export async function diagnose(
   knowledge: Knowledge[],
   options: Options,
   depth: string,
-  progress: (message: string, percent: number) => void,
+  progress: (message: string, percent: number) => void | Promise<void>,
 ) {
   const limits =
     depth === 'quick'
@@ -355,13 +391,13 @@ export async function diagnose(
   const results = [];
   for (let i = 0; i < chunks.length; i++) {
     options.signal.throwIfAborted();
-    progress(
+    await progress(
       `Understanding modules · ${i + 1} of ${chunks.length}`,
       25 + Math.round((i / chunks.length) * 40),
     );
     results.push(parseResult(await generate(system + '\nSOURCE BATCH:\n' + chunks[i], options)));
   }
-  progress('Connecting patterns and root causes', 72);
+  await progress('Connecting patterns and root causes', 72);
   const result =
     results.length === 1
       ? results[0]
